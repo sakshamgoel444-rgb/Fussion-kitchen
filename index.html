@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fusion Kitchen AI</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+:root{--bg:linear-gradient(135deg,#0F172A 0%,#1E293B 50%,#334155 100%);--glass:rgba(15,23,42,.95);--accent:#10B981}
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:var(--bg);color:#fff;min-height:100vh;padding:20px}
+.container{max-width:420px;margin:0 auto}
+.card{background:var(--glass);border:1px solid rgba(16,185,129,.3);border-radius:24px;padding:25px;margin-bottom:20px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.btn{background:#10B981;color:#fff;border:none;padding:15px;border-radius:15px;width:100%;font-weight:bold;margin-top:10px;cursor:pointer}
+.btn-secondary{background:rgba(255,255,255,.2)}
+input[type=file]{display:none}
+video{width:100%;border-radius:15px;transform:scaleX(-1)}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="container">
+    <h2 style="text-align:center;color:#10B981;margin-bottom:20px">🍽️ Fusion Kitchen</h2>
+
+    <div class="card" id="uploadCard">
+        <h3 style="margin-bottom:15px">1. Scan Ingredients</h3>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">📸 Upload Photo</button>
+        <button class="btn btn-secondary" onclick="startCam()">🎥 Live Camera</button>
+        
+        <div id="camUI" class="hidden" style="margin-top:15px">
+            <video id="video" autoplay playsinline></video>
+            <button class="btn" onclick="snap()">Capture</button>
+        </div>
+        <input type="file" id="fileInput" accept="image/*" onchange="handleFile(this.files[0])">
+    </div>
+
+    <div class="card hidden" id="optionsCard">
+        <h3 style="margin-bottom:15px">2. Customize</h3>
+        <p id="detected" style="color:#aaa;font-size:14px"></p>
+        <select id="cuisine" style="width:100%;padding:15px;border-radius:12px;margin:15px 0;background:#334155;color:white;border:1px solid #10B981">
+            <option value="Indian">🇮🇳 Indian</option>
+            <option value="Italian">🇮🇹 Italian</option>
+            <option value="Mexican">🇲🇽 Mexican</option>
+            <option value="Chinese">🇨🇳 Chinese</option>
+        </select>
+        <button class="btn" onclick="generate()">🔥 Cook Recipe</button>
+    </div>
+
+    <div class="card hidden" id="recipeCard">
+        <h2 id="rName" style="color:#10B981"></h2>
+        <div style="margin:15px 0" id="rContent"></div>
+        <button class="btn btn-secondary" onclick="speak()">🔊 Read Steps</button>
+        <button class="btn" onclick="savePDF()">💾 Save PDF</button>
+    </div>
+
+    <div id="loader" class="hidden" style="text-align:center;padding:20px">Thinking...</div>
+</div>
+
+<script>
+const API_KEY='AIzaSyC0pMrE1aXuiVSBS-Fqfv94skIq1WXEQkE'; // Valid Key
+let imgBlob=null, recipeText='';
+
+async function startCam(){
+    document.getElementById('camUI').classList.remove('hidden');
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    document.getElementById('video').srcObject = stream;
+}
+
+function snap(){
+    const vid = document.getElementById('video');
+    const cvs = document.createElement('canvas');
+    cvs.width = vid.videoWidth; cvs.height = vid.videoHeight;
+    cvs.getContext('2d').drawImage(vid,0,0);
+    cvs.toBlob(b=>{ handleFile(b); vid.srcObject.getTracks().forEach(t=>t.stop()); document.getElementById('camUI').classList.add('hidden'); },'image/jpeg');
+}
+
+function handleFile(file){
+    imgBlob=file;
+    document.getElementById('loader').classList.remove('hidden');
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onloadend = async() => {
+        const base64 = reader.result.split(',')[1];
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({contents:[{parts:[{text:"List ingredients seen:"},{inline_data:{mime_type:'image/jpeg',data:base64}}]}]})
+        });
+        const data = await res.json();
+        document.getElementById('detected').innerText = "Found: " + data.candidates[0].content.parts[0].text;
+        document.getElementById('loader').classList.add('hidden');
+        document.getElementById('uploadCard').classList.add('hidden');
+        document.getElementById('optionsCard').classList.remove('hidden');
+    }
+}
+
+async function generate(){
+    const cuisine = document.getElementById('cuisine').value;
+    const ingredients = document.getElementById('detected').innerText;
+    document.getElementById('loader').classList.remove('hidden');
+    document.getElementById('optionsCard').classList.add('hidden');
+    
+    const prompt = `Create a ${cuisine} recipe using: ${ingredients}. Format as clean HTML with <h3>Ingredients</h3> and <ol>Steps</ol>.`;
+    
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+    });
+    const data = await res.json();
+    const html = data.candidates[0].content.parts[0].text.replace(/```html|```/g,'');
+    
+    document.getElementById('rName').innerText = cuisine + " Special";
+    document.getElementById('rContent').innerHTML = html;
+    recipeText = document.getElementById('rContent').innerText;
+    
+    document.getElementById('loader').classList.add('hidden');
+    document.getElementById('recipeCard').classList.remove('hidden');
+}
+
+function speak(){ window.speechSynthesis.speak(new SpeechSynthesisUtterance(recipeText)); }
+function savePDF(){ html2pdf().from(document.getElementById('recipeCard')).save('recipe.pdf'); }
+</script>
+</body>
+</html>
